@@ -1,6 +1,6 @@
 # MyMemories API
 
-MyMemories is a Spring Boot backend for user accounts and personal memories. The current API implements registration, login, and listing the authenticated user's memories.
+MyMemories is a Spring Boot backend for user accounts and personal memories. The API implements registration, login, and authenticated memory CRUD with owner-scoped listing, search, pagination, and sorting.
 
 ## Requirements
 
@@ -39,6 +39,36 @@ After PostgreSQL is running and the environment variables are set:
 ```
 
 The API uses the port supplied by the `PORT` environment variable, or `8080` when it is not set.
+
+## Deploy to Render
+
+This repository includes a Dockerfile for a Render web service. It builds and tests the Spring Boot application with Java 25 and runs the packaged JAR. The `.dockerignore` excludes local environment files and build output from the image build.
+
+1. Push the backend repository to GitHub. Do not commit `.env` or production credentials.
+2. In Render, create **New > Web Service**, connect this repository and branch, and select **Docker** as the runtime. Keep the Dockerfile path as `./Dockerfile`; no separate build or start command is needed.
+3. Create the web service in the **same Render region** as your existing Render PostgreSQL database so it can use the database's internal host.
+4. In the database's **Connect** page, use the **Internal Database URL** / internal connection details. Set these web-service environment variables:
+
+   | Key | Value |
+   | --- | --- |
+   | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://<internal-host>:<port>/<database-name>` |
+   | `SPRING_DATASOURCE_USERNAME` | Database username from Render |
+   | `SPRING_DATASOURCE_PASSWORD` | Database password from Render |
+   | `JWT_SECRET` | A randomly generated Base64 secret containing at least 32 random bytes |
+   | `CORS_ALLOWED_ORIGINS` | Your deployed static site's exact origin, e.g. `https://your-site.onrender.com` |
+
+   Use the host, port, database name, username, and password from Render's internal connection details. The URL must start with `jdbc:postgresql://`; do not paste a `postgres://` or `postgresql://` connection URL unchanged. Keep credentials and the JWT secret in Render's environment settings, not in Git. Render provides `PORT` to the service; the application listens on that port.
+
+   Generate a secret locally in PowerShell and paste its output into Render without saving it in the repository:
+   ```powershell
+   [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+   ```
+
+5. Create the service and check its deploy logs. On first startup, Flyway applies the database migration. The service should become healthy after Spring finishes starting.
+6. Copy the web service's public URL. Configure your static site's API base URL to that backend URL, then make sure `CORS_ALLOWED_ORIGINS` on the backend matches the static site's exact origin (scheme and hostname, no path). Redeploy/restart the backend after changing environment variables.
+7. Smoke-test registration, login, and memory CRUD using a disposable account. Do not use production credentials in test requests.
+
+Do not use the database's external connection URL from the web service; Render's internal database host is intended for services in the same region. If your database is in another region, use the connection method Render documents for that setup and expect external connectivity constraints.
 
 ## API
 
