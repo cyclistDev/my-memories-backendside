@@ -72,6 +72,10 @@ Do not use the database's external connection URL from the web service; Render's
 
 ## API
 
+### Service status
+
+`GET /` is public and returns `{"message":"MyMemories API is running"}`. Use this endpoint to confirm the deployed service is responding. Account and memory endpoints are documented below.
+
 ### Register
 
 `POST /api/auth/register`

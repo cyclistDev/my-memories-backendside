@@ -64,6 +64,13 @@ class MyMemoriesApplicationTests {
 	}
 
 	@Test
+	void rootEndpointIsPublicAndReportsServiceStatus() throws Exception {
+		mockMvc.perform(get("/"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.message").value("MyMemories API is running"));
+	}
+
+	@Test
 	void protectedRequestsDoNotCreateHttpSession() throws Exception {
 		var result = mockMvc.perform(get("/api/private-test"))
 			.andExpect(status().isUnauthorized())
