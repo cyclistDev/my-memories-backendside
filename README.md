@@ -92,7 +92,6 @@ Validation, duplicate-account, and malformed-body errors use a consistent shape:
 
 ```json
 {
-  "status": 400,
   "message": "Validation failed",
   "fieldErrors": {
     "email": "Email must be valid"
@@ -128,36 +127,66 @@ Optional query parameters:
 | Parameter | Default | Description |
 | --- | --- | --- |
 | `q` | — | Case-insensitive literal substring matched against title or content. |
+| `from` | — | Inclusive earliest `memoryDate` (`YYYY-MM-DD`). |
+| `to` | — | Inclusive latest `memoryDate` (`YYYY-MM-DD`). |
+| `tag` | — | One or more tag names; memories matching any supplied tag are included. Repeat the parameter, for example `tag=family&tag=japan`. |
 | `page` | `0` | Zero-based page index. |
-| `size` | `20` | Number of memories per page. |
-| `sort` | `id,desc` | Spring Data sort expression; for example, `sort=title,asc`. |
+| `size` | `20` | Number of memories per page, capped at `50`. |
+| `sort` | `memoryDate,desc`, then `createdAt,desc` | Spring Data sort expression; for example, `sort=title,asc`. |
 
-Example: `GET /api/memories?q=summer&page=0&size=10&sort=title,asc`
+All provided filters combine with AND, except multiple `tag` values which match ANY of those tags. Example: `GET /api/memories?q=summer&from=2022-01-01&to=2025-12-31&tag=family&tag=japan&page=0&size=10&sort=title,asc`
 
-The response is a Spring Data page containing a `content` array of `{ "id", "title", "content" }` objects and page metadata such as `totalElements`, `totalPages`, `number`, and `size`.
+The response is a Spring Data page containing a `content` array of `{ "id", "title", "content", "memoryDate", "createdAt", "updatedAt", "tags" }` objects and page metadata such as `totalElements`, `totalPages`, `number`, and `size`.
 
 ### Create a memory
 
 `POST /api/memories`
 
-Send a bearer token and a JSON body with a non-blank title (at most 255 characters) and optional content:
+Send a bearer token and a JSON body with a non-blank title (at most 150 characters), optional content (at most 10,000 characters), and optional event date:
 
 ```json
 {
   "title": "A day at the lake",
-  "content": "We went there together."
+  "content": "We went there together.",
+  "memoryDate": "2025-07-12",
+  "tags": ["family", "japan"]
 }
 ```
 
-Returns `201 Created` with `{ "id", "title", "content" }`. The server assigns the authenticated user as owner; clients cannot set or change ownership.
+`memoryDate` is an ISO date (`YYYY-MM-DD`) and defaults to today when omitted. `tags` is optional and can contain up to 10 names, each 1-30 characters. Tag names are trimmed, lowercased, and created automatically for the authenticated user if needed. Returns `201 Created` with the memory fields plus `createdAt` and `updatedAt` ISO timestamps and normalized tags. The server assigns the authenticated user as owner; clients cannot set or change ownership.
 
 ### Get, update, and delete a memory
 
 - `GET /api/memories/{id}` returns the memory if it belongs to the authenticated user.
-- `PUT /api/memories/{id}` replaces its title and content. The title is required; omitted or `null` content clears the content.
+- `PUT /api/memories/{id}` replaces its title, content, and event date. The title is required; omitted or `null` content clears the content; omitted event date defaults to today.
 - `DELETE /api/memories/{id}` deletes it and returns `204 No Content`.
 
-Each operation returns `404 Not Found` if the memory does not exist or belongs to another user, avoiding disclosure of other users' records. A blank or overlong title returns `400 Bad Request` using the standard validation error shape.
+Each operation returns `404 Not Found` if the memory does not exist or belongs to another user, avoiding disclosure of other users' records. A blank or overlong title, or content exceeding 10,000 characters, returns `400 Bad Request` using the standard validation error shape.
+
+### Current user
+
+`GET /api/users/me` returns the authenticated user's `id`, `username`, and `email`. It does not expose password data.
+
+### Tags
+
+`GET /api/tags` returns the authenticated user's tags, sorted by name, with `{ "name", "memoryCount" }` fields. Tags are private to their owner. Updating a memory replaces its tag list; deleting a memory leaves its tags intact, reporting zero for tags with no remaining memories.
+
+### On this day and resurfacing
+
+Pass the client's local date explicitly so server timezone differences do not affect the result:
+
+- `GET /api/memories/on-this-day?date=2025-02-28` returns prior-year memories with a matching month/day, grouped by year in descending order. In a non-leap year, February 28 also includes memories from February 29 in past leap years.
+- `GET /api/memories/resurface?date=2025-02-28` returns one memory, preferring an on-this-day match. If there is no match, it selects a random memory at least one year old. It returns `204 No Content` if no memory qualifies and avoids repeating the prior day's surfaced memory when another choice is available.
+
+Resurfacing is private and in-app only; it does not send notifications.
+
+### Resurfacing settings
+
+- `GET /api/users/me/settings` returns `{ "resurfaceFrequency": "DAILY" }` for a new account.
+- `PUT /api/users/me/settings` accepts `{"resurfaceFrequency":"DAILY"}`, `{"resurfaceFrequency":"WEEKLY"}`, or `{"resurfaceFrequency":"OFF"}`.
+- `DAILY` allows one stable surfaced memory per client-provided date. `WEEKLY` allows one surfaced memory every seven days; requests before the seven-day interval return `204 No Content`. `OFF` always returns `204 No Content` from the resurface endpoint.
+
+Settings apply only to in-app resurfacing; they do not configure email or push notifications.
 
 ## Test
 

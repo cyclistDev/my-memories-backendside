@@ -43,8 +43,9 @@ MyMemories/
 |   |   |   |-- MyMemoriesApplication.java    Spring Boot entry point
 |   |   |   |-- config/SecurityConfig.java    Security filter, password encoder, CORS
 |   |   |   |-- controller/AuthController.java Registration and login routes
-|   |   |   |-- controller/UserController.java Memory listing and CRUD routes
-|   |   |   |-- dto/MemoryDTO.java             Memory response shape
+|   |   |   |-- controller/MemoryController.java Owner-scoped memory CRUD and listing
+|   |   |   |-- controller/UserController.java   Current-user profile route
+|   |   |   |-- dto/MemoryDTO.java               Memory response shape
 |   |   |   |-- dto/request/                   LoginRequest, RegisterRequest
 |   |   |   |-- dto/response/                  LoginResponse, RegisterResponse
 |   |   |   |-- entity/                        User, Memory, empty Category placeholder
@@ -52,6 +53,7 @@ MyMemories/
 |   |   |   |-- mapper/userMapper.java         Empty mapper placeholder
 |   |   |   |-- repositories/                  UserRepository and MemoryRepository
 |   |   |   |-- service/AuthService.java       Authentication service interface
+|   |   |   |-- service/MemoryService.java     Owner-scoped memory operations
 |   |   |   |-- service/impl/AuthServiceImpl.java Registration/login logic
 |   |   |   `-- utils/                         JWT utility and request filter
 |   |   `-- resources/
@@ -64,15 +66,16 @@ MyMemories/
 
 ## 4. Data Models
 
-Only `User` and `Memory` are JPA entities. No category or image entity/table is implemented.
+`User`, `Memory`, and `Tag` are JPA entities. No category or image entity/table is implemented.
 
 | Entity/table | Fields | Relationships and constraints |
 | --- | --- | --- |
-| `User` / `users` | `id` (`Long`, generated identity primary key), `username` (`String`), `password` (`String`), `email` (`String`), `memories` (list) | Username and email are non-null and unique. `User` has a one-to-many relationship to `Memory`, mapped by `Memory.user`, with cascade-all and orphan removal. Password is stored as a BCrypt hash by the registration service. |
-| `Memory` / `memories` | `id` (`Long`, generated identity primary key), `title` (`String`), `content` (`String`, mapped to SQL `TEXT`), `user` (`User`) | Many-to-one to `User`; `user_id` is non-null. `title` is non-null. `content` is nullable by the current mapping. |
+| `User` / `users` | `id` (`Long`, generated identity primary key), `username` (`String`), `password` (`String`), `email` (`String`), `resurface_frequency` (`DAILY`, `WEEKLY`, or `OFF`; defaults to `DAILY`), `memories` (list) | Username and email are non-null and unique. `User` has a one-to-many relationship to `Memory`, mapped by `Memory.user`, with cascade-all and orphan removal. Password is stored as a BCrypt hash by the registration service. |
+| `Memory` / `memories` | `id` (`Long`, generated identity primary key), `title` (`String`, max 150), `content` (`String`, max 10,000, mapped to SQL `TEXT`), `memory_date` (`LocalDate`), `created_at` / `updated_at` (`LocalDateTime`), `user` (`User`) | Many-to-one to `User`; `user_id` is non-null. Title and event date are required; content is nullable. A composite index covers `(user_id, memory_date)`. |
+| `Tag` / `tags` | `id`, normalized `name` (1-30 chars), `user` owner | Unique per `(user_id, name)`; names are trimmed/lowercased before persistence. Many-to-many with memories through `memory_tags`. |
 | `Category` | None | Plain empty Java class, not annotated as an entity and has no table or relationship. |
 
-There are no explicit date/time, image URL, visibility/privacy, category, or audit fields. The `User` and `Memory` entities use Lombok `@Getter` and `@Setter`, avoiding `@Data`-generated `toString`, `equals`, and `hashCode` methods over JPA relationships.
+The event date defaults to today if omitted; save/edit timestamps are maintained automatically. Each memory can have at most 10 owner-scoped tags; the tags API includes each user's memory counts. No image URL, visibility/privacy, category, or other audit fields are implemented. The `User`, `Memory`, and `Tag` entities use Lombok `@Getter` and `@Setter`, avoiding `@Data`-generated `toString`, `equals`, and `hashCode` methods over JPA relationships.
 
 ## 5. API Endpoints
 
@@ -82,15 +85,21 @@ Request DTOs use Bean Validation for required fields, email format, the registra
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/auth/register` | `{"username":"...","email":"...","password":"..."}` | `201`: `{id, username, email, token}`. Validation and duplicate-account errors return `400` in the common error shape. | No |
 | `POST` | `/api/auth/login` | `{"email":"...","password":"..."}` | `200`: `{id, username, email, token}`. Invalid credentials return `401` in the common error shape. | No |
-| `GET` | `/api/memories` | Optional `q`, `page`, `size`, `sort` query parameters | `200`: page of current user's `{id, title, content}` records. | Yes |
-| `POST` | `/api/memories` | `{"title":"...","content":"..."}` | `201`: `{id, title, content}`; owner comes from authentication. | Yes |
-| `GET` | `/api/memories/{id}` | — | `200`: `{id, title, content}`; `404` if absent or non-owned. | Yes |
-| `PUT` | `/api/memories/{id}` | `{"title":"...","content":"..."}` | `200`: updated record; `404` if absent or non-owned. | Yes |
+| `GET` | `/api/users/me` | — | `200`: current user's `{id, username, email}`; no password. | Yes |
+| `GET` | `/api/memories` | Optional `q`, inclusive `from`/`to`, repeated `tag`, `page`, `size` (max 50), `sort` query parameters | `200`: page of current user's `{id, title, content, memoryDate, createdAt, updatedAt, tags}` records; filters combine with AND, tags match ANY; default order is event date then save time descending. | Yes |
+| `GET` | `/api/memories/on-this-day?date=YYYY-MM-DD` | Client-local date | `200`: prior-year memories with matching month/day grouped by year; February 29 also appears on February 28 in non-leap years. | Yes |
+| `GET` | `/api/memories/resurface?date=YYYY-MM-DD` | Client-local date | `200`: one on-this-day memory or random memory at least one year old; `204` if none. Avoids previous day's item when possible. | Yes |
+| `GET` | `/api/users/me/settings` | — | `200`: `{resurfaceFrequency}`; default `DAILY`. | Yes |
+| `PUT` | `/api/users/me/settings` | `{"resurfaceFrequency":"DAILY|WEEKLY|OFF"}` | `200`: updated `{resurfaceFrequency}`. `WEEKLY` uses a seven-day cooldown; `OFF` disables resurfacing. | Yes |
+| `POST` | `/api/memories` | `{"title":"...","content":"...","memoryDate":"YYYY-MM-DD","tags":["family"]}` (`memoryDate`, `tags` optional) | `201`: memory fields including date, timestamps, and normalized tags; owner comes from authentication. | Yes |
+| `GET` | `/api/memories/{id}` | — | `200`: memory fields including date and timestamps; `404` if absent or non-owned. | Yes |
+| `PUT` | `/api/memories/{id}` | `{"title":"...","content":"...","memoryDate":"YYYY-MM-DD","tags":["family"]}` (`memoryDate`, `tags` optional) | `200`: updated record; `404` if absent or non-owned. | Yes |
 | `DELETE` | `/api/memories/{id}` | — | `204`; `404` if absent or non-owned. | Yes |
+| `GET` | `/api/tags` | — | `200`: current user's `{name, memoryCount}` tags. | Yes |
 
-Memory titles must be non-blank and no longer than 255 characters; content is optional. PUT replaces the title and content, and missing/null content clears it. Memory queries constrain results to the authenticated user's id; attempts to access another user's record return `404`.
+Memory titles must be non-blank and no longer than 150 characters; content is optional and limited to 10,000 characters. Event date defaults to today when omitted; save/edit timestamps are maintained automatically. Tags are trimmed/lowercased, at most 30 characters, and limited to 10 per memory; missing tags are created for the authenticated user. PUT replaces the title, content, event date, and tags; missing/null content clears it. Deleting a memory leaves its tags intact. `GET /api/memories` filters in the database by owner, optional text, inclusive event-date range, and any matching requested tag; all filters combine with AND. Page size is capped at 50. Memory/tag queries constrain results to the authenticated user's id; attempts to access another user's record return `404`.
 
-Validation, malformed/null request bodies, and duplicate accounts return `{"status":number,"message":"...","fieldErrors":{"field":"..."}}`.
+Validation, malformed/null request bodies, and duplicate accounts return `{"message":"...","fieldErrors":{"field":"..."}}`; the HTTP status communicates the error status.
 
 ## 6. Authentication and Authorization
 

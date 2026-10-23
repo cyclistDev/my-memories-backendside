@@ -47,7 +47,7 @@ public class SecurityConfig {
                         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                         response.setContentType("application/json");
                         objectMapper.writeValue(response.getOutputStream(),
-                                new ApiErrorResponse(401, "Unauthorized", java.util.Map.of()));
+                                new ApiErrorResponse("Unauthorized", java.util.Map.of()));
                     }))
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

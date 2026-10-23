@@ -31,6 +31,11 @@ public class User {
     @Column(nullable = false, unique = true)
     private String email;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "resurface_frequency", nullable = false, length = 10)
+    @Builder.Default
+    private ResurfaceFrequency resurfaceFrequency = ResurfaceFrequency.DAILY;
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<Memory> memories = new ArrayList<>();

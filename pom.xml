@@ -11,7 +11,7 @@
 	
 	<groupId>com.group5</groupId>
 	<artifactId>MyMemories</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>0.0.1</version>
 	<name>MyMemories</name>
 	<description>Create a secure backend system that allows users to store, organize, search, and protect their personal memories.</description>
 	<url/>

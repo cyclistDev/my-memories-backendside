@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN resurface_frequency VARCHAR(10) NOT NULL DEFAULT 'DAILY';
